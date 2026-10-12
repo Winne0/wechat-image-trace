@@ -94,7 +94,7 @@ python3 scripts/import_urls.py scripts/seed_urls.txt
 
 | Method | Path | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/search` | 上传图片（form field `file`）或贴图床地址（`image_url`）检索 |
+| `POST` | `/api/search` | 上传图片（form field `file`）或贴图床地址（`image_url`）检索；额外字段 `scope=local\|web` 选择检索范围 |
 | `POST` | `/api/import` | `{urls:[...]}` 提交导入任务，返回 `job_id` |
 | `GET`  | `/api/import/{job_id}` | 查询任务进度与逐条结果 |
 | `GET`  | `/api/articles?q=` | 列出已收录文章（按标题/公众号筛选） |
@@ -104,7 +104,39 @@ python3 scripts/import_urls.py scripts/seed_urls.txt
 | `GET`  | `/api/demo-query` | 内置传播版示例图 |
 | `POST` | `/api/reindex` | 强制重载内存索引（导入完成后会自动调） |
 | `GET`  | `/api/stats` | 库容量统计 |
+| `GET`  | `/api/providers` | 全网检索引擎的启用状态（哪些已配 key、哪些缺） |
 | `GET`  | `/api/health` | 健康检查 |
+
+## 全网检索（超出本地收录范围）
+
+本地指纹库只能覆盖**你收录过**的文章。要搜全网，需要接入第三方以图搜图引擎——
+这类能力没有免费的公开接口，必须要有 API Key（各家都有免费额度，够日常用）。
+
+支持四个引擎，配了哪个用哪个，可同时启用、并发调用后合并去重：
+
+| 引擎 | 环境变量 | 特点 | 免费额度 |
+| --- | --- | --- | --- |
+| Google Lens（SerpAPI） | `SERPAPI_KEY` | 覆盖面最广，中文网页命中最好 | 100 次/月 |
+| Bing 视觉搜索 | `BING_VISUAL_KEY` | 上传二进制直接搜，稳定 | Azure 免费档 1000 次/月 |
+| TinEye | `TINEYE_KEY` + `TINEYE_SECRET` | 擅长找**原始出处**与修改版本 | 需申请 |
+| SauceNAO | `SAUCENAO_KEY` | 二次元插画/漫画溯源最强 | 免费注册即有额度 |
+
+配置方式（以 SerpAPI 为例）：
+
+```bash
+export SERPAPI_KEY=你的key
+bash scripts/start.sh          # 重启后界面上「全网检索」即可用
+# Docker：
+docker compose up -d           # 在 environment 里加 SERPAPI_KEY: ...
+```
+
+**排序逻辑**：引擎原始分 + 域名加权——`mp.weixin.qq.com` 命中 +0.28，知乎/CSDN/头条等常见转载站 +0.12。
+也就是说即使全网搜，公众号来源和其他转载源也会自动排到前面，符合"找公众号出处"的目标。
+
+未配置任何 Key 时，界面会明确提示，调用接口返回 400 与配置指引，**不会静默失败**。
+
+> 安全：图片代理接口默认只放行公网 http(s)，内网/回环/链路本地地址一律拒绝（防 SSRF）；
+> 设 `STRICT_WECHAT_PROXY=1` 可退回「仅允许微信域名」的严格模式。
 
 ## 调参与限制
 

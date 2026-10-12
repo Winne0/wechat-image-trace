@@ -10,14 +10,18 @@ const json = async (res) => {
   return res.json()
 }
 
-export async function searchImage({ file, imageUrl, topK = 10 }) {
+export async function searchImage({ file, imageUrl, topK = 10, scope = 'local' }) {
   const form = new FormData()
   if (file) form.append('file', file)
   if (imageUrl) form.append('image_url', imageUrl)
   form.append('top_k', String(topK))
+  form.append('scope', scope)
   const res = await fetch('/api/search', { method: 'POST', body: form })
   return json(res)
 }
+
+/** 当前后端已启用的全网检索引擎（用于界面提示）。 */
+export const getProviders = () => fetch('/api/providers').then(json)
 
 export async function importArticles(urls) {
   const res = await fetch('/api/import', {

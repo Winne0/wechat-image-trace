@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  deleteArticle, getArticles, getStats, importArticles, importStatus, searchImage,
+  deleteArticle, getArticles, getProviders, getStats,
+  importArticles, importStatus, searchImage,
 } from './api.js'
 import ResultCard from './components/ResultCard.jsx'
 import LibraryPanel from './components/LibraryPanel.jsx'
@@ -32,6 +33,8 @@ export default function App() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [stats, setStats] = useState({ articles: 0, articles_ok: 0, images: 0 })
+  const [scope, setScope] = useState('local')
+  const [providers, setProviders] = useState(null)
 
   const inputRef = useRef(null)
   const previewRef = useRef('')
@@ -41,6 +44,7 @@ export default function App() {
   }, [])
 
   useEffect(() => { refreshStats() }, [refreshStats])
+  useEffect(() => { getProviders().then(setProviders).catch(() => {}) }, [])
 
   const pickFile = useCallback((f) => {
     if (!f || !f.type.startsWith('image/')) {
@@ -92,7 +96,7 @@ export default function App() {
     setResult(null)
     try {
       const data = await searchImage({
-        file: useFile, imageUrl: useUrl || undefined,
+        file: useFile, imageUrl: useUrl || undefined, scope,
       })
       setResult(data)
       refreshStats()
@@ -217,12 +221,33 @@ export default function App() {
                 )}
               </div>
 
+              <div className="scope">
+                <button
+                  className={scope === 'local' ? 'on' : ''}
+                  onClick={() => setScope('local')}
+                >本地指纹库</button>
+                <button
+                  className={scope === 'web' ? 'on' : ''}
+                  onClick={() => setScope('web')}
+                >全网检索</button>
+              </div>
+              <div className="scope-note">
+                {scope === 'local'
+                  ? '在你收录过的公众号文章图库内做指纹比对 · 毫秒级 · 完全离线'
+                  : (providers?.enabled?.length
+                    ? `已启用引擎：${providers.enabled.join('、')} · 结果按与公众号的关联度排序`
+                    : '尚未配置以图搜图引擎的 API Key，全网检索暂时不可用（见 README「全网检索」一节）')}
+              </div>
+
               {error && <div className="alert" style={{ marginTop: 14 }}>{error}</div>}
             </div>
 
             {loading && (
               <div className="card" style={{ marginTop: 18 }}>
-                <div className="searching"><span className="spinner" />正在指纹库里比对…</div>
+                <div className="searching">
+                  <span className="spinner" />
+                  {scope === 'web' ? '正在调用以图搜图引擎检索全网…' : '正在指纹库里比对…'}
+                </div>
               </div>
             )}
 
@@ -231,23 +256,36 @@ export default function App() {
                 <div className="results-head">
                   <h2>{result.hits.length ? '匹配结果' : '没有找到匹配'}</h2>
                   <span>
-                    已比对 {result.total_indexed} 张索引图片 · 按置信度排序
+                    {scope === 'web'
+                      ? `全网命中 ${result.hits.length} 条 · 公众号来源优先`
+                      : `已比对 ${result.total_indexed} 张索引图片 · 按置信度排序`}
                   </span>
                 </div>
 
                 {result.hits.length === 0 ? (
                   <div className="card">
                     <div className="empty">
-                      <div className="big">这张图不在当前索引库里</div>
-                      可能原因：文章还没被收录进库，或图片被重度裁剪 / 二次创作。<br />
-                      在右侧粘贴原文链接把它加进索引库，就能被搜到了。
+                      {scope === 'web' ? (
+                        <>
+                          <div className="big">全网没有找到这张图的出处</div>
+                          可能原因：图片太小众、被重度裁剪或二次创作，也可能引擎配额已用尽。<br />
+                          可换用本地指纹库，或先收录相关文章再搜。
+                        </>
+                      ) : (
+                        <>
+                          <div className="big">这张图不在当前索引库里</div>
+                          可能原因：文章还没被收录进库，或图片被重度裁剪 / 二次创作。<br />
+                          在右侧粘贴原文链接把它加进索引库，就能被搜到了。
+                        </>
+                      )}
                     </div>
                   </div>
                 ) : (
                   result.hits.map((hit, i) => (
                     <ResultCard
-                      key={`${hit.article.id}-${i}`}
+                      key={`${hit.article?.id || hit.source_url || 'w'}-${i}`}
                       hit={hit}
+                      rank={i + 1}
                       queryPreview={previewUrl}
                       queryImageUrl={imageUrl}
                     />

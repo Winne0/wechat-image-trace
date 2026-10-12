@@ -13,13 +13,14 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from urllib.parse import quote
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from . import crawler, features
+from . import crawler, features, websearch
 from .db import Article, Image, SessionLocal, engine
 from .search import index
 
@@ -214,10 +215,51 @@ def _confidence(h: dict) -> str:
     return "low"
 
 
+def _web_confidence(score: float) -> str:
+    if score >= 0.70:
+        return "high"
+    if score >= 0.45:
+        return "medium"
+    return "low"
+
+
+async def _do_web_search(raw: bytes, top_k: int) -> dict:
+    """把引擎结果转成与本地检索一致的前端结构。"""
+    res = await websearch.search_web(raw, top_k=top_k)
+    hits = []
+    for item in res["hits"]:
+        img = item["image_url"] or ""
+        hits.append({
+            "score": round(item["score"], 4),
+            "confidence": _web_confidence(item["score"]),
+            "provider": item["provider"],
+            "snippet": item["snippet"],
+            "image": {
+                "url": img,
+                "preview": f"/api/proxy-image?url={quote(img, safe='')}" if img else "",
+                "width": 0, "height": 0, "alt": "",
+                "position": None, "is_cover": 0,
+            },
+            "article": {
+                "id": 0, "title": item["title"], "account": "",
+                "url": item["url"], "publish_time": "",
+                "cover": "",
+            },
+            "evidence": None,
+        })
+    return {
+        "total_indexed": res["total_matches"],
+        "hits": hits,
+        "engines": res["engines"],
+        "engine_errors": res["errors"],
+    }
+
+
 @app.post("/api/search")
 async def api_search(file: UploadFile | None = File(default=None),
                      image_url: str | None = Form(default=None),
-                     top_k: int = Form(default=10)):
+                     top_k: int = Form(default=10),
+                     scope: str = Form(default="local")):
     raw = None
     if file is not None and file.filename:
         raw = await file.read()
@@ -237,6 +279,16 @@ async def api_search(file: UploadFile | None = File(default=None),
             raise HTTPException(400, f"图片下载失败：{exc}")
     else:
         raise HTTPException(400, "请上传图片或提供图片地址")
+
+    if scope == "web":
+        if len(raw) > MAX_UPLOAD:
+            raise HTTPException(413, "图片过大（上限 16MB）")
+        try:
+            return await _do_web_search(raw, min(top_k, 30))
+        except RuntimeError as exc:
+            raise HTTPException(400, str(exc))
+        except Exception as exc:
+            raise HTTPException(502, f"全网检索失败：{exc}")
 
     try:
         feats = features.extract(raw)
@@ -324,17 +376,60 @@ async def api_preview(image_id: int):
 
 @app.get("/api/proxy-image")
 async def api_proxy_image(url: str):
-    """代理外部图片，规避浏览器直连微信 CDN 的防盗链限制。"""
+    """代理外部图片，规避浏览器直连图床的防盗链限制。
+
+    默认放行任意公网 http(s) 图片（全网检索需要）；设 STRICT_WECHAT_PROXY=1
+    可退回「仅代理微信公众号域名」的严格模式。内网 / 回环地址一律拒绝。
+    """
     from urllib.parse import urlparse
-    host = urlparse(url).netloc.lower()
-    if not any(host.endswith(h) for h in crawler.IMAGE_HOSTS + crawler.ARTICLE_HOSTS):
-        raise HTTPException(400, "只允许代理微信公众号域名的图片")
+
+    strict = os.getenv("STRICT_WECHAT_PROXY", "").strip() == "1"
+    if strict:
+        host = urlparse(url).netloc.lower()
+        if not any(host.endswith(h) for h in crawler.IMAGE_HOSTS + crawler.ARTICLE_HOSTS):
+            raise HTTPException(400, "严格模式下只允许代理微信公众号域名的图片")
+    elif not websearch.is_safe_url(url):
+        raise HTTPException(400, "不允许代理该地址（仅支持公网 http(s)）")
+
     try:
-        data = crawler.download_image(url)
+        data = await _fetch_image(url)
     except Exception as exc:
         raise HTTPException(502, f"图片拉取失败：{exc}")
     from fastapi import Response
-    return Response(content=data, media_type="image/jpeg")
+    return Response(content=data, media_type=_sniff_mime(data))
+
+
+async def _fetch_image(url: str, referer: str | None = None) -> bytes:
+    """通用图片下载：带浏览器 UA，用目标站点自身作 Referer。"""
+    from urllib.parse import urlparse
+    if referer is None:
+        p = urlparse(url)
+        referer = f"{p.scheme}://{p.netloc}/"
+    headers = {
+        "User-Agent": crawler.UA,
+        "Referer": referer,
+        "Accept": "image/avif,image/webp,image/*,*/*;q=0.8",
+    }
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True,
+                                 headers=headers) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        if len(resp.content) > 20 * 1024 * 1024:
+            raise ValueError("图片超过 20MB")
+        return resp.content
+
+
+def _sniff_mime(data: bytes) -> str:
+    """按文件头判断真实图片类型，避免用固定的 image/jpeg 骗浏览器。"""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"GIF":
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:2] == b"BM":
+        return "image/bmp"
+    return "image/jpeg"
 
 
 @app.post("/api/reindex")
@@ -351,6 +446,12 @@ async def api_demo_query():
     if not os.path.exists(path):
         raise HTTPException(404, "示例图未生成，先运行 scripts/seed_demo.py")
     return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/api/providers")
+async def api_providers():
+    """全网检索可用引擎状态（缺 key 的引擎会列在 missing 里）。"""
+    return websearch.provider_status()
 
 
 @app.get("/api/health")
