@@ -4,6 +4,8 @@
 
 **在线演示：<https://a31062177a119e5b1.sg.agentos-app.run>**
 
+![项目封面](docs/posters/app/app-poster.png)
+
 ![效果预览](docs/ui-2-result.png)
 
 ## 是什么、不是什么
