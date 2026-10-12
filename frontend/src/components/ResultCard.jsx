@@ -10,7 +10,7 @@ function Ring({ score, color }) {
     <div className="ring">
       <svg width="76" height="76" viewBox="0 0 76 76">
         <circle cx="38" cy="38" r={R} fill="none"
-          stroke="rgba(226,220,208,.09)" strokeWidth="5" />
+          stroke="rgba(15,23,42,.08)" strokeWidth="5" />
         <circle cx="38" cy="38" r={R} fill="none"
           stroke={color} strokeWidth="5" strokeLinecap="round"
           strokeDasharray={`${dash} ${C}`} />
@@ -51,7 +51,7 @@ export default function ResultCard({ hit, queryPreview, queryImageUrl, rank = 1 
   const providerName = hit.provider ? `引擎 · ${hit.provider}` : ''
 
   const color = confidence === 'high' ? 'var(--jade)'
-    : confidence === 'medium' ? 'var(--gold)' : '#6E7683'
+    : confidence === 'medium' ? 'var(--gold)' : 'var(--dim)'
 
   return (
     <article

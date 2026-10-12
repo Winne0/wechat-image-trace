@@ -134,7 +134,7 @@ export default function LibraryPanel({ onStatsChange }) {
                 <a href={a.url} target="_blank" rel="noreferrer">原文</a>
                 <button className="del" onClick={() => onDelete(a.id)}>移除</button>
               </div>
-              {a.status === 'failed' && <div className="m" style={{ color: '#ff9a93' }}>{a.error}</div>}
+              {a.status === 'failed' && <div className="m" style={{ color: 'var(--clay)' }}>{a.error}</div>}
             </div>
           ))}
         </div>
