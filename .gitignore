@@ -1,0 +1,33 @@
+# ---- 沙箱环境自带目录（非项目代码，不入库）----
+.codebuddy/
+.templates/
+.genie/
+.cloudstudio
+*.zip
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- Node ----
+node_modules/
+frontend/dist/
+.vite/
+
+# ---- 运行时数据（可用脚本重建，不入库）----
+backend/data/index.db
+backend/data/images/
+backend/data/*.jpg
+*.log
+
+# ---- 环境变量 ----
+.env
+.env.local
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
